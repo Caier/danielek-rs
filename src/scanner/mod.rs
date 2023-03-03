@@ -6,6 +6,7 @@ use std::time::Instant;
 use crossbeam::sync::ShardedLock;
 use futures_util::StreamExt;
 use once_cell::sync::Lazy;
+use regex::Regex;
 use uuid::Uuid;
 
 use crate::gateway::shard::GatewayShard;
@@ -64,6 +65,7 @@ impl GiftScanner {
                             "READY" => self.handle_ready(payload),
                             "GUILD_CREATE" => self.handle_guild_create(payload),
                             "GUILD_DELETE" => self.handle_guild_delete(payload),
+                            "MESSAGE_CREATE" => self.handle_message_create(payload),
                             _ => continue
                         }
                     } 
@@ -76,9 +78,24 @@ impl GiftScanner {
         Ok(())
     }
 
+    fn handle_message_create(&mut self, payload: &serde_json::Value) {
+        static MSG_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?im)discord\.gift\/([\d\w]{1,19})(?: |$)").unwrap());
+
+        let content = payload["content"].as_str().unwrap_or("");
+        let Some(id) = MSG_REGEX.captures(content).and_then(|c| c.get(1)) else { 
+            return;
+        };
+    
+        if SHARED.used_codes.read().unwrap().contains(id.as_str()) {
+            return;
+        }
+
+        
+    }
+
     fn handle_guild_delete(&mut self, payload: &serde_json::Value) {
         let id = payload["id"].as_str().unwrap();
-        SHARED.guilds.write().unwrap().get_mut(&self.id).unwrap().remove(id);
+        SHARED.guilds.write().unwrap().entry(self.id).and_modify(|set| { set.remove(id); });
     }
 
     fn handle_guild_create(&mut self, payload: &serde_json::Value) {
@@ -94,15 +111,16 @@ impl GiftScanner {
                 }
             }
         }
-        SHARED.guilds.write().unwrap().get_mut(&self.id).unwrap().insert(joined_id.to_owned());
+        SHARED.guilds.write().unwrap().entry(self.id).and_modify(|set| { set.insert(joined_id.to_owned()); });
     }
 
     fn handle_ready(&mut self, payload: &serde_json::Value) {
         if self.ready_at == None {
             let guilds = payload["guilds"].as_array().unwrap().iter().map(|go| go["id"].as_str().unwrap().to_owned());
-            SHARED.guilds.write().unwrap().get_mut(&self.id).unwrap().extend(guilds);
+            SHARED.guilds.write().unwrap().entry(self.id).and_modify(|set| set.extend(guilds));
         }
 
+        //println!("{}: {}", );
         self.ready_at = Some(Instant::now());
     }
 }

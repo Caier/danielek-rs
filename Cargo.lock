@@ -188,6 +188,7 @@ dependencies = [
  "lazy_static",
  "log",
  "once_cell",
+ "regex",
  "reqwest",
  "serde",
  "serde_json",

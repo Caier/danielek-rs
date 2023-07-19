@@ -1,11 +1,10 @@
-use std::env::var;
+use std::sync::Arc;
 
-use futures_util::StreamExt;
-use gateway::{shard::GatewayShard, types::GatewayIntents};
+use futures_util::{future::join_all};
 
-use crate::gateway::types::GatewayEvent;
+use scanner::{message_relay::MessageRelay, GiftScanner};
 
-
+mod dapi;
 mod gateway;
 mod scanner;
 
@@ -14,20 +13,44 @@ async fn main() {
     env_logger::init();
     dotenv::dotenv().ok();
 
-    // {
-    //     let intents = 
-    //         GatewayIntents::GUILDS |
-    //         GatewayIntents::MESSAGE_CONTENT |
-    //         GatewayIntents::GUILD_MESSAGES  |
-    //         GatewayIntents::DIRECT_MESSAGES;
+    let vars = ["TOKENS", "REDTOKEN", "WEBHOOK", "COMMAND_GUILD_CHANNEL"]
+        .map(|v| std::env::var(v).map_err(|_| v));
 
-    //     let mut shard = GatewayShard::new(var("TOKENS").unwrap(), intents, true).await.unwrap();
-        
-    //     while let Some(Ok(e)) = shard.get_event_stream_mut().unwrap().next().await {
-    //         println!("OP: {}, t: {:?}", e.op, e.t);
-    //         if let Some("READY") = e.t.as_ref().map(|s| s.as_str()) {
-    //             println!("{:#?}", e.d.unwrap()["guilds"][0]);
-    //         }
-    //     }
-    // }
+    if vars.iter().any(|r| r.is_err()) {
+        panic!(
+            "Could not load following env variables: {:?}",
+            vars.iter()
+                .filter(|r| r.is_err())
+                .map(|r| r.as_ref().unwrap_err())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    let vars = vars.map(|r| r.unwrap());
+    let (webhook_id, webhook_token) = vars[2]
+        .split_once('/')
+        .expect("Invalid WEBHOOK format (should be \"id/token\"");
+    let (cmd_guild, cmd_channel) = vars[3]
+        .split_once('/')
+        .expect("Invalid COMMAND_GUILD_CHANNEL format (should be \"id/id\")");
+    let relay = Arc::new(MessageRelay::new(webhook_id, webhook_token).unwrap());
+
+    let mut tasks = vec![];
+    for token in vars[0].split(',') {
+        let mut scanner = GiftScanner::new(
+            token,
+            &vars[1],
+            false,
+            cmd_channel,
+            cmd_guild,
+            Arc::clone(&relay),
+        )
+        .await
+        .unwrap();
+        tasks.push(tokio::spawn(async move {
+            scanner.start().await.unwrap();
+        }));
+    }
+
+    join_all(tasks).await;
 }

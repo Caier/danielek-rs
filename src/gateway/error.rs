@@ -1,6 +1,6 @@
-use std::{error::Error as StdError, fmt::{Display}, borrow::Cow};
+use std::{borrow::Cow, error::Error as StdError, fmt::Display};
 
-use tokio_tungstenite::tungstenite::{protocol::CloseFrame, error::Error as WSError};
+use tokio_tungstenite::tungstenite::{error::Error as WSError, protocol::CloseFrame};
 
 #[derive(Debug)]
 pub enum GCError<'a> {
@@ -10,12 +10,12 @@ pub enum GCError<'a> {
     UnexpectedClose(Option<CloseFrame<'a>>),
     UnreconnectableClose(CloseFrame<'a>),
     ReconnectableClose(Option<CloseFrame<'a>>),
-    SendError(WSError),                     
+    SendError(WSError),
     ConnectError(WSError),
     WSInternal(WSError),
     Shutdown,
     NoHeartbeat,
-    Misc(Option<Box<dyn StdError + Send + Sync>>, Cow<'a, str>)
+    Misc(Option<Box<dyn StdError + Send + Sync>>, Cow<'a, str>),
 }
 
 pub type GCResult<T> = Result<T, GCError<'static>>;
@@ -27,19 +27,44 @@ impl<'a> Display for GCError<'a> {
         match self {
             GatewayURLFetch(e) => write!(f, "Fetching the gateway URL from API failed: {}", e),
             InitialHandshake(e) => write!(f, "Cannot initiate the connection: {}", e),
-            InternalChannelError(e) => write!(f, "An unhandled error occured while trying to use internal channels: {}", e),
-            UnexpectedClose(Some(ref cf)) => write!(f, "The connection with the gateway unexpectedly closed with the following frame: {}", cf),
-            UnexpectedClose(None) => write!(f, "The connection with the gateway unexpectedly closed without a frame"),
-            UnreconnectableClose(cf) => write!(f, "The connection with the gateway was remotely closed: {}", cf),
-            ReconnectableClose(Some(ref cf)) => write!(f, "The connection dropped or should drop, however it should be Resumed: {}", cf),
-            ReconnectableClose(None) => write!(f, "The connection dropped or should drop, however it should be Resumed"),
+            InternalChannelError(e) => write!(
+                f,
+                "An unhandled error occured while trying to use internal channels: {}",
+                e
+            ),
+            UnexpectedClose(Some(ref cf)) => write!(
+                f,
+                "The connection with the gateway unexpectedly closed with the following frame: {}",
+                cf
+            ),
+            UnexpectedClose(None) => write!(
+                f,
+                "The connection with the gateway unexpectedly closed without a frame"
+            ),
+            UnreconnectableClose(cf) => write!(
+                f,
+                "The connection with the gateway was remotely closed: {}",
+                cf
+            ),
+            ReconnectableClose(Some(ref cf)) => write!(
+                f,
+                "The connection dropped or should drop, however it should be Resumed: {}",
+                cf
+            ),
+            ReconnectableClose(None) => write!(
+                f,
+                "The connection dropped or should drop, however it should be Resumed"
+            ),
             SendError(we) => write!(f, "Sending an event to the gateway failed with: {}", we),
-            Shutdown => write!(f, "The connection thread should shut down, this error should've been handled"),
+            Shutdown => write!(
+                f,
+                "The connection thread should shut down, this error should've been handled"
+            ),
             ConnectError(we) => write!(f, "Connecting with the remote websocket failed: {}", we),
             WSInternal(we) => write!(f, "Unexpected WS error: {}", we),
             NoHeartbeat => write!(f, "Didn't receive a Heartbeat ACK in time"),
             Misc(Some(e), desc) => write!(f, "{}", format!("{}: {}", desc, e)),
-            Misc(None, desc) => write!(f, "{}", desc)
+            Misc(None, desc) => write!(f, "{}", desc),
         }
     }
 }
@@ -49,14 +74,14 @@ impl<'a> StdError for GCError<'a> {
         use GCError::*;
 
         match self {
-            GatewayURLFetch(e) 
-            | InitialHandshake(e) 
+            GatewayURLFetch(e)
+            | InitialHandshake(e)
             | Misc(Some(e), _)
             | InternalChannelError(e) => Some(&**e),
 
             SendError(we) | ConnectError(we) | WSInternal(we) => Some(we),
 
-            _ => None
+            _ => None,
         }
     }
 }

@@ -1,4 +1,4 @@
-use std::{time::Duration, env::var, error::Error as StdError};
+use std::{error::Error as StdError, time::Duration};
 
 macro_rules! try_x_times {
     ($times:expr, $what:expr) => {{
@@ -14,31 +14,35 @@ macro_rules! try_x_times {
                 break Ok(());
             }
         }
-    }}
+    }};
 }
+use once_cell::sync::Lazy;
 pub(crate) use try_x_times;
 
-use super::error::{GCResult, GCError};
-
-lazy_static::lazy_static! {
-    static ref HTTP: reqwest::Client = reqwest::ClientBuilder::new()
-        .timeout(Duration::from_secs(10))
-        .build()
-        .unwrap();
-}
+use super::error::{GCError, GCResult};
 
 pub async fn fetch_wss_url() -> GCResult<String> {
+    static HTTP: Lazy<reqwest::Client> = Lazy::new(|| {
+        reqwest::ClientBuilder::new()
+            .timeout(Duration::from_secs(10))
+            .build()
+            .unwrap()
+    });
+
     async {
-        Ok::<String, Box<dyn StdError + Send + Sync>>(
-            format!("{}/?v=10" , HTTP
-            .get(format!("{}/gateway", var("API_BASE")?))
-            .send()
-            .await?
-            .error_for_status()?
-            .json::<serde_json::Value>()
-            .await?["url"]
-            .as_str()
-            .ok_or("Invalid json")?
-            .to_owned()))
-    }.await.map_err(|e| GCError::GatewayURLFetch(e))
+        Ok::<String, Box<dyn StdError + Send + Sync>>(format!(
+            "{}/?v=10",
+            HTTP.get("https://discord.com/api/v10/gateway")
+                .send()
+                .await?
+                .error_for_status()?
+                .json::<serde_json::Value>()
+                .await?["url"]
+                .as_str()
+                .ok_or("Invalid json")?
+                .to_owned()
+        ))
+    }
+    .await
+    .map_err(|e| GCError::GatewayURLFetch(e))
 }

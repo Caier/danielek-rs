@@ -1,26 +1,42 @@
-use std::time::Duration;
+use std::{
+    sync::{atomic::AtomicU64, Arc},
+    time::Duration,
+};
 
-use log::debug;
-use tokio::{sync::{mpsc, oneshot}, time::Instant};
+use log::{debug, error, warn};
+use tokio::{
+    sync::{mpsc, oneshot},
+    time::Instant,
+};
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tokio_tungstenite::{tungstenite::protocol::WebSocketConfig, connect_async_with_config};
+use tokio_tungstenite::{connect_async_with_config, tungstenite::protocol::WebSocketConfig};
 
-use crate::{gateway::{util::try_x_times, error::GCError}};
+use crate::gateway::{error::GCError, util::try_x_times};
 
-use super::{connection::{GatewayThreadMessage, GatewayConnection}, types::{GatewayEvent, GatewayIntents}, util::fetch_wss_url, error::GCResult};
+use super::{
+    connection::{GatewayConnection, GatewayThreadMessage},
+    error::GCResult,
+    types::{GatewayEvent, GatewayIntents},
+    util::fetch_wss_url,
+};
 
 pub struct GatewayShard {
     comm_tx: mpsc::Sender<GatewayThreadMessage>,
-    evnt_rx: Option<UnboundedReceiverStream<GCResult<GatewayEvent>>>
+    evnt_rx: Option<UnboundedReceiverStream<GCResult<GatewayEvent>>>,
+    ping: Arc<AtomicU64>,
 }
 
 impl GatewayShard {
-    pub async fn new(token: impl Into<String>, intents: GatewayIntents, force_reconnect: bool) -> GCResult<GatewayShard> {
+    pub async fn new(
+        token: impl Into<String>,
+        intents: GatewayIntents,
+        force_reconnect: bool,
+    ) -> GCResult<GatewayShard> {
         let ws_config = WebSocketConfig {
             max_send_queue: None,
             max_message_size: Some(1 << 30),
             max_frame_size: Some(1 << 28),
-            accept_unmasked_frames: false
+            accept_unmasked_frames: false,
         };
 
         let wss_url = fetch_wss_url().await?;
@@ -28,7 +44,9 @@ impl GatewayShard {
 
         let (comm_tx, comm_rx) = tokio::sync::mpsc::channel(32);
         let (evnt_tx, evnt_rx) = mpsc::unbounded_channel();
-        
+
+        let ping = Arc::new(AtomicU64::new(999));
+
         let mut conn = GatewayConnection {
             comm_rx,
             evnt_tx,
@@ -42,44 +60,35 @@ impl GatewayShard {
             intents: intents.bits(),
             resume_info: None,
             websocket_config: ws_config,
-            force_reconnect
+            force_reconnect,
+            ping: Arc::clone(&ping),
         };
 
         tokio::spawn(async move {
             'mainl: loop {
                 let res = conn.conn_loop().await;
-                dbg!(&res);
                 match res {
                     Ok(_) => unreachable!(),
                     Err(why) => match why {
-                        GCError::ReconnectableClose(_) | GCError::NoHeartbeat => {
-                            loop {
-                                debug!("Attempting resume...");
-                                if let Err(why) = try_x_times!(5, conn.resume().await) {
-                                    debug!("Resuming failed with: {}", why);
-                                    if !conn.force_reconnect {
-                                        conn.evnt_tx.send(Err(why)).ok();
-                                        break 'mainl;
-                                    }
-                                } else {
-                                    break;
+                        //non-fatal connection close, handle as per documentation
+                        GCError::ReconnectableClose(_) | GCError::NoHeartbeat => loop {
+                            debug!("Attempting resume because of {}", why);
+                            if let Err(why) = try_x_times!(5, conn.resume().await) {
+                                error!("Resuming failed with: {}", why);
+                                if !conn.force_reconnect {
+                                    conn.evnt_tx.send(Err(why)).ok();
+                                    break 'mainl;
                                 }
+                            } else {
+                                break;
                             }
-                        }
+                        },
 
-                        GCError::UnexpectedClose(_) => {
-                            loop {
-                                debug!("Attempting reconnect...");
-                                if let Err(why) = try_x_times!(5, conn.reconnect().await) {
-                                    debug!("Reconnecting failed with: {}", why);
-                                    if !conn.force_reconnect {
-                                        conn.evnt_tx.send(Err(why)).ok();
-                                        break 'mainl;
-                                    }
-                                } else {
-                                    break;
-                                }
-                            }
+                        //fatal, but documented close, will not reconnect (ex. Invalid token)
+                        GCError::UnreconnectableClose(_) => {
+                            error!("Connection failed with {}", why);
+                            conn.evnt_tx.send(Err(why)).ok();
+                            break;
                         }
 
                         GCError::Shutdown => {
@@ -87,32 +96,38 @@ impl GatewayShard {
                             break;
                         }
 
-                        e => {
-                            loop {
-                                debug!("Connection irrecoverably failed with: {}", e);
+                        //other unexpected and undocumented errors ex. no internet, Protocol(ResetWithoutClosingHandshake). try reconnect
+                        e => loop {
+                            warn!("Unexpected connection error: {}", e);
+                            if let Err(why) = try_x_times!(5, conn.reconnect().await) {
+                                error!("Reconnecting failed with: {}", why);
                                 if !conn.force_reconnect {
-                                    conn.evnt_tx.send(Err(e)).ok();
+                                    conn.evnt_tx.send(Err(why)).ok();
                                     break 'mainl;
-                                } else {
-                                    debug!("Attempting reconnect...");
-                                    if let Ok(_) = try_x_times!(5, conn.reconnect().await) {
-                                        break;
-                                    }
                                 }
+                            } else {
+                                break;
                             }
-                        }
-                    }
+                        },
+                    },
                 }
             }
-            dbg!("Closed shard thread");
+            debug!("Closed shard thread");
         });
 
-        Ok(GatewayShard { comm_tx, evnt_rx: Some(UnboundedReceiverStream::new(evnt_rx)) })
+        Ok(GatewayShard {
+            comm_tx,
+            evnt_rx: Some(UnboundedReceiverStream::new(evnt_rx)),
+            ping,
+        })
     }
 
     pub async fn send(&mut self, event: GatewayEvent) -> GCResult<()> {
         let (tx, rx) = oneshot::channel();
-        self.comm_tx.send(GatewayThreadMessage::SendEvent(event, tx)).await.unwrap();
+        self.comm_tx
+            .send(GatewayThreadMessage::SendEvent(event, tx))
+            .await
+            .unwrap();
         rx.await.unwrap()
     }
 
@@ -120,7 +135,14 @@ impl GatewayShard {
         self.evnt_rx.take()
     }
 
-    pub fn get_event_stream_mut(&mut self) -> Option<&mut UnboundedReceiverStream<GCResult<GatewayEvent>>> {
+    #[allow(unused)]
+    pub fn get_event_stream_mut(
+        &mut self,
+    ) -> Option<&mut UnboundedReceiverStream<GCResult<GatewayEvent>>> {
         self.evnt_rx.as_mut()
+    }
+
+    pub fn get_ping(&self) -> u64 {
+        self.ping.load(std::sync::atomic::Ordering::Relaxed)
     }
 }

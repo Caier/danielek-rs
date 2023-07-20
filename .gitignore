@@ -1,3 +1,5 @@
 /target
 .env
 danielek-log.txt
+fly.toml
+deploy.bat

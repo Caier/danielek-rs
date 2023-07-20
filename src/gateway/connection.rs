@@ -5,7 +5,7 @@ use std::{
 
 use futures_util::{SinkExt, StreamExt};
 use log::debug;
-use serde_json::json;
+use ijson::ijson as json;
 use tokio::{
     net::TcpStream,
     select,
@@ -177,7 +177,7 @@ impl GatewayConnection {
                                 event
                                     .d
                                     .as_ref()
-                                    .and_then(|d| d["heartbeat_interval"].as_u64())
+                                    .and_then(|d| d["heartbeat_interval"].to_u64())
                                     .ok_or(GCError::InvalidPayload(
                                         "Hello payload has no heartbeat information".into(),
                                     ))?,
@@ -199,18 +199,20 @@ impl GatewayConnection {
                                     gateway_url: event
                                         .d
                                         .as_ref()
-                                        .and_then(|d| d["resume_gateway_url"].as_str())
+                                        .and_then(|d| d["resume_gateway_url"].as_string())
                                         .ok_or(GCError::InvalidPayload(
                                             "READY payload has no ResumeInfo information".into(),
                                         ))?
+                                        .as_str()
                                         .to_owned(),
                                     session_id: event
                                         .d
                                         .as_ref()
-                                        .and_then(|d| d["session_id"].as_str())
+                                        .and_then(|d| d["session_id"].as_string())
                                         .ok_or(GCError::InvalidPayload(
                                             "READY payload has no ResumeInfo information".into(),
                                         ))?
+                                        .as_str()
                                         .to_owned(),
                                 });
                             }
@@ -221,7 +223,7 @@ impl GatewayConnection {
                                 && event
                                     .d
                                     .as_ref()
-                                    .is_some_and(|d| d.as_bool().unwrap_or(false))
+                                    .is_some_and(|d| d.to_bool().unwrap_or(false))
                         {
                             Err(GCError::ReconnectableClose(None))?;
                         } else if event.op == GatewayOpcode::INVALID_SESSION {

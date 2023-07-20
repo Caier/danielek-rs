@@ -14,7 +14,6 @@ use log::info;
 use once_cell::sync::Lazy;
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
-use std::error::Error;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use uuid::Uuid;
@@ -44,7 +43,7 @@ pub struct GiftScanner {
     command_channel: Snowflake,
     command_guild: Snowflake,
     ready_at: Option<Instant>,
-    last_msg: Option<serde_json::Value>,
+    last_msg: Option<ijson::IValue>,
     guild_channel_names: HashMap<Snowflake, String>,
 }
 
@@ -98,7 +97,7 @@ impl GiftScanner {
             match e {
                 Ok(e) => {
                     if let Some(ev_type) = e.t {
-                        let payload = e.d.unwrap_or(serde_json::Value::Null);
+                        let payload = e.d.unwrap_or(ijson::IValue::NULL);
                         match ev_type.as_str() {
                             "READY" => self.handle_ready(&payload).await?,
                             "GUILD_CREATE" => self.handle_guild_create(&payload).await,
@@ -119,18 +118,18 @@ impl GiftScanner {
         Err("Scanner event stream stopped peacefully, this shouldn't have happened".into())
     }
 
-    fn handle_guild_or_channel_update(&mut self, payload: &serde_json::Value) {
-        let id = payload["id"].as_str();
-        let name = payload["name"].as_str();
+    fn handle_guild_or_channel_update(&mut self, payload: &ijson::IValue) {
+        let id = payload["id"].as_string();
+        let name = payload["name"].as_string().map(|s| s.as_str());
         if let Some(id) = id {
             self.guild_channel_names
-                .insert(id.to_owned(), name.unwrap_or("???").to_owned());
+                .insert(id.as_str().to_owned(), name.unwrap_or("???").to_owned());
         }
     }
 
-    async fn handle_message_create(&mut self, payload: serde_json::Value) {
-        if matches!(payload["channel_id"].as_str(), Some(id) if id == self.command_channel) {
-            self.handle_command(payload["content"].as_str().unwrap_or(""))
+    async fn handle_message_create(&mut self, payload: ijson::IValue) {
+        if matches!(payload["channel_id"].as_string().map(|s| s.as_str()), Some(id) if id == self.command_channel) {
+            self.handle_command(payload["content"].as_string().map(|s| s.as_str()).unwrap_or(""))
                 .await;
             return;
         }
@@ -138,7 +137,7 @@ impl GiftScanner {
         self.last_msg = Some(payload);
         let payload = self.last_msg.as_ref().unwrap();
 
-        let content = payload["content"].as_str().unwrap_or("");
+        let content = payload["content"].as_string().map(|s| s.as_str()).unwrap_or("");
         let Some(gift_code) = regex!(r"discord\.gift/([\d\w]{1,19})(?: |$)"im).captures(content)
             .and_then(|c| c.get(1).map(|c| c.as_str())) else {
                 return;
@@ -170,18 +169,18 @@ impl GiftScanner {
         };
 
         let channel_name = payload["channel_id"]
-            .as_str()
+            .as_string().map(|s| s.as_str())
             .and_then(|id| self.guild_channel_names.get(id).map(|s| s.as_str()))
             .unwrap_or("??");
         let guild_name = payload["guild_id"]
-            .as_str()
+            .as_string().map(|s| s.as_str())
             .and_then(|id| self.guild_channel_names.get(id).map(|s| s.as_str()))
             .unwrap_or("??");
         let safe_content = regex!("(?:@everyone)|(?:@here)").replace_all(content, "");
 
         let mut report = GiftReport {
             from: payload["author"]["username"]
-                .as_str()
+                .as_string().map(|s| s.as_str())
                 .unwrap_or("??")
                 .into(),
             channel: channel_name.into(),
@@ -205,10 +204,7 @@ impl GiftScanner {
         self.relay.gift_report(&self.username, report).await;
     }
 
-    async fn redeem_code<'a>(
-        &self,
-        code: Cow<'a, str>,
-    ) -> std::result::Result<(Cow<'a, str>, GiftRedeemAttempt), Box<dyn Error + Send + Sync>> {
+    async fn redeem_code<'a>(&self, code: Cow<'a, str>) -> Result<(Cow<'a, str>, GiftRedeemAttempt)> {
         if self.ignore {
             let res = self
                 .redeem_dapi
@@ -290,7 +286,7 @@ impl GiftScanner {
                     self.shard.get_ping(),
                     self.last_msg
                         .as_ref()
-                        .and_then(|v| v["content"].as_str())
+                        .and_then(|v| v["content"].as_string().map(|s| s.as_str()))
                         .unwrap_or(""),
                     self.ignore,
                     guilds,
@@ -303,8 +299,8 @@ impl GiftScanner {
         }
     }
 
-    async fn handle_guild_delete(&mut self, payload: &serde_json::Value) {
-        let id = payload["id"].as_str().unwrap();
+    async fn handle_guild_delete(&mut self, payload: &ijson::IValue) {
+        let id = payload["id"].as_string().map(|s| s.as_str()).unwrap();
         SHARED
             .guilds
             .lock()
@@ -316,9 +312,9 @@ impl GiftScanner {
         self.guild_channel_names.remove(id);
     }
 
-    async fn handle_guild_create(&mut self, payload: &serde_json::Value) {
+    async fn handle_guild_create(&mut self, payload: &ijson::IValue) {
         self.handle_guild_or_channel_update(payload);
-        let joined_id = payload["id"].as_str().unwrap();
+        let joined_id = payload["id"].as_string().map(|s| s.as_str()).unwrap();
         if joined_id == self.command_guild {
             return;
         }
@@ -363,7 +359,7 @@ impl GiftScanner {
         self.shard
             .send(GatewayEvent {
                 d: Some(
-                    serde_json::value::to_value(
+                    ijson::to_value(
                         GatewayPresenceBuilder::default()
                             .status(GatewayStatus::online)
                             .activities([GatewayActivityBuilder::default()
@@ -382,26 +378,26 @@ impl GiftScanner {
             .await
     }
 
-    async fn handle_ready(&mut self, payload: &serde_json::Value) -> Result<()> {
-        let name = payload["user"]["username"].as_str().ok_or("No username")?;
+    async fn handle_ready(&mut self, payload: &ijson::IValue) -> Result<()> {
+        let name = payload["user"]["username"].as_string().map(|s| s.as_str()).ok_or("No username")?;
         if self.ready_at.is_none() {
             let guilds = payload["guilds"]
                 .as_array()
                 .ok_or("Could not get guild array")?;
             let mut lock = SHARED.guilds.lock().unwrap();
             for g in guilds {
-                let id = g["id"].as_str().ok_or("Guild lacks id")?.to_owned();
+                let id = g["id"].as_string().map(|s| s.as_str()).ok_or("Guild lacks id")?.to_owned();
                 lock.entry(self.id).and_modify(|set| {
                     set.insert(id.clone());
                 });
                 self.guild_channel_names
-                    .insert(id, g["name"].as_str().ok_or("Guild lacks name")?.to_owned());
+                    .insert(id, g["name"].as_string().map(|s| s.as_str()).ok_or("Guild lacks name")?.to_owned());
                 for c in g["channels"].as_array().ok_or("Guild lacks channels")? {
                     self.guild_channel_names.insert(
-                        c["id"].as_str().ok_or("Channel lacks id")?.to_owned(),
+                        c["id"].as_string().map(|s| s.as_str()).ok_or("Channel lacks id")?.to_owned(),
                         c["name"]
-                            .as_str()
-                            .map(|s| s.to_owned())
+                            .as_string()
+                            .map(|s| s.as_str().to_owned())
                             .unwrap_or_else(|| String::from("??")),
                     );
                 }

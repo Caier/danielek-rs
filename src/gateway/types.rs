@@ -49,7 +49,7 @@ impl GatewayOpcode {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct GatewayEvent {
     pub op: GatewayOpcode,
-    pub d: Option<serde_json::Value>,
+    pub d: Option<ijson::IValue>,
     pub s: Option<i32>,
     pub t: Option<String>,
 }

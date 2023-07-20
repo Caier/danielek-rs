@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use futures_util::{future::join_all};
+use futures_util::future::select_all;
 
 use scanner::{message_relay::MessageRelay, GiftScanner};
 
@@ -48,9 +48,15 @@ async fn main() {
         .await
         .unwrap();
         tasks.push(tokio::spawn(async move {
-            scanner.start().await.unwrap();
+            scanner.start().await //should never return
         }));
     }
 
-    join_all(tasks).await;
+    match select_all(tasks).await {
+        (Ok(Err(e)), _, _) => {
+            relay.log_error("main", &*e, Some("Fatal shard error")).await;
+            panic!("A scanner failed with: {e}");
+        }
+        _ => unreachable!()
+    }
 }

@@ -178,7 +178,7 @@ impl GatewayConnection {
                                     .d
                                     .as_ref()
                                     .and_then(|d| d["heartbeat_interval"].as_u64())
-                                    .ok_or(GCError::InitialHandshake(
+                                    .ok_or(GCError::InvalidPayload(
                                         "Hello payload has no heartbeat information".into(),
                                     ))?,
                             );
@@ -200,7 +200,7 @@ impl GatewayConnection {
                                         .d
                                         .as_ref()
                                         .and_then(|d| d["resume_gateway_url"].as_str())
-                                        .ok_or(GCError::InitialHandshake(
+                                        .ok_or(GCError::InvalidPayload(
                                             "READY payload has no ResumeInfo information".into(),
                                         ))?
                                         .to_owned(),
@@ -208,7 +208,7 @@ impl GatewayConnection {
                                         .d
                                         .as_ref()
                                         .and_then(|d| d["session_id"].as_str())
-                                        .ok_or(GCError::InitialHandshake(
+                                        .ok_or(GCError::InvalidPayload(
                                             "READY payload has no ResumeInfo information".into(),
                                         ))?
                                         .to_owned(),

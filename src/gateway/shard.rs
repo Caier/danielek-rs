@@ -65,51 +65,50 @@ impl GatewayShard {
         };
 
         tokio::spawn(async move {
-            'mainl: loop {
-                let res = conn.conn_loop().await;
-                match res {
-                    Ok(_) => unreachable!(),
-                    Err(why) => match why {
-                        //non-fatal connection close, handle as per documentation
-                        GCError::ReconnectableClose(_) | GCError::NoHeartbeat => loop {
-                            debug!("Attempting resume because of {}", why);
-                            if let Err(why) = try_x_times!(5, conn.resume().await) {
-                                error!("Resuming failed with: {}", why);
-                                if !conn.force_reconnect {
-                                    conn.evnt_tx.send(Err(why)).ok();
-                                    break 'mainl;
-                                }
-                            } else {
-                                break;
-                            }
-                        },
-
-                        //fatal, but documented close, will not reconnect (ex. Invalid token)
-                        GCError::UnreconnectableClose(_) => {
-                            error!("Connection failed with {}", why);
-                            conn.evnt_tx.send(Err(why)).ok();
-                            break;
-                        }
-
-                        GCError::Shutdown => {
-                            conn.evnt_tx.send(Err(GCError::Shutdown)).ok();
-                            break;
-                        }
-
-                        //other unexpected and undocumented errors ex. no internet, Protocol(ResetWithoutClosingHandshake). try reconnect
-                        e => loop {
-                            warn!("Unexpected connection error: {}", e);
-                            if let Err(why) = try_x_times!(5, conn.reconnect().await) {
-                                error!("Reconnecting failed with: {}", why);
-                                if !conn.force_reconnect {
-                                    conn.evnt_tx.send(Err(why)).ok();
-                                    break 'mainl;
-                                }
-                            } else {
-                                break;
-                            }
-                        },
+            loop {
+                let err = conn.conn_loop().await.unwrap_err();
+                match &err {
+                    //non-fatal connection close, handle as per documentation
+                    GCError::ReconnectableClose(_) | GCError::NoHeartbeat => {
+                        debug!("Attempting resume because of {}", err);
+                        match try_x_times!(5, conn.resume().await) {
+                            Err(why) => error!("Resuming failed with: {}", why),
+                            Ok(_) => continue
+                        } 
                     },
+
+                    //fatal, but documented close, will not reconnect (ex. Invalid token)
+                    GCError::UnreconnectableClose(_) | GCError::InvalidPayload(_) | GCError::InternalChannelError(_) => {
+                        error!("Connection failed with {err}");
+                        conn.evnt_tx.send(Err(err)).ok();
+                        break;
+                    }
+
+                    GCError::Shutdown => {
+                        conn.evnt_tx.send(Err(GCError::Shutdown)).ok();
+                        break;
+                    }
+
+                    //other unexpected and undocumented errors ex. no internet, Protocol(ResetWithoutClosingHandshake). try reconnect
+                    e => {
+                        warn!("Unexpected connection error: {e}");
+                        match try_x_times!(5, conn.reconnect().await) {
+                            Err(why) => error!("Reconnecting failed with: {why}"),
+                            Ok(_) => continue
+                        }
+                    },
+                }
+
+                if conn.force_reconnect {
+                    loop {
+                        match try_x_times!(20, conn.reconnect().await) {
+                            Err(why) => error!("Force reconnect keeps failing with: {why}"),
+                            Ok(_) => break
+                        }
+                    }
+                } else {
+                    conn.evnt_tx.send(Err(err)).ok();
+                    break;
                 }
             }
             debug!("Closed shard thread");

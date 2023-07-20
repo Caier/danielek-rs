@@ -23,7 +23,7 @@ use self::message_relay::{GiftRedeemAttempt, GiftReport, MessageRelay};
 
 pub mod message_relay;
 
-type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync + 'static>>;
 
 #[derive(Default, Debug)]
 struct SharedData {
@@ -63,7 +63,7 @@ impl GiftScanner {
             | GatewayIntents::DIRECT_MESSAGES;
 
         let token = token.into();
-        let shard = GatewayShard::new(token.clone(), intents, false).await?;
+        let shard = GatewayShard::new(token.clone(), intents, true).await?;
 
         let id = Uuid::new_v4();
         SHARED.guilds.lock().unwrap().insert(id, Default::default());
@@ -112,11 +112,11 @@ impl GiftScanner {
                     }
                 }
 
-                Err(why) => return Err(why.into()),
+                Err(why) => return Err(why.into())
             }
         }
 
-        Ok(())
+        Err("Scanner event stream stopped peacefully, this shouldn't have happened".into())
     }
 
     fn handle_guild_or_channel_update(&mut self, payload: &serde_json::Value) {

@@ -5,7 +5,7 @@ use tokio_tungstenite::tungstenite::{error::Error as WSError, protocol::CloseFra
 #[derive(Debug)]
 pub enum GCError<'a> {
     GatewayURLFetch(Box<dyn StdError + Send + Sync>),
-    InitialHandshake(Box<dyn StdError + Send + Sync>),
+    InvalidPayload(Box<dyn StdError + Send + Sync>),
     InternalChannelError(Box<dyn StdError + Send + Sync>),
     UnexpectedClose(Option<CloseFrame<'a>>),
     UnreconnectableClose(CloseFrame<'a>),
@@ -26,7 +26,7 @@ impl<'a> Display for GCError<'a> {
 
         match self {
             GatewayURLFetch(e) => write!(f, "Fetching the gateway URL from API failed: {}", e),
-            InitialHandshake(e) => write!(f, "Cannot initiate the connection: {}", e),
+            InvalidPayload(e) => write!(f, "Could not parse a crucial information from a payload: {}", e),
             InternalChannelError(e) => write!(
                 f,
                 "An unhandled error occured while trying to use internal channels: {}",
@@ -75,7 +75,7 @@ impl<'a> StdError for GCError<'a> {
 
         match self {
             GatewayURLFetch(e)
-            | InitialHandshake(e)
+            | InvalidPayload(e)
             | Misc(Some(e), _)
             | InternalChannelError(e) => Some(&**e),
 

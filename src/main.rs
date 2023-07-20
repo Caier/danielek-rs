@@ -3,6 +3,7 @@ use std::sync::Arc;
 use futures_util::future::select_all;
 
 use scanner::{message_relay::MessageRelay, GiftScanner};
+use simplelog::{CombinedLogger, TermLogger, WriteLogger, ConfigBuilder};
 
 mod dapi;
 mod gateway;
@@ -10,8 +11,15 @@ mod scanner;
 
 #[tokio::main]
 async fn main() {
-    env_logger::init();
     dotenv::dotenv().ok();
+    CombinedLogger::init(vec![
+        TermLogger::new(log::LevelFilter::Info, Default::default(), simplelog::TerminalMode::Stderr, simplelog::ColorChoice::Auto),
+        WriteLogger::new(log::LevelFilter::Debug, ConfigBuilder::default()
+            .set_target_level(log::LevelFilter::Error)
+            .add_filter_allow_str("danielek")
+            .build(), 
+            std::fs::OpenOptions::new().create(true).append(true).open("danielek-log.txt").unwrap())
+    ]).unwrap();
 
     let vars = ["TOKENS", "REDTOKEN", "WEBHOOK", "COMMAND_GUILD_CHANNEL"]
         .map(|v| std::env::var(v).map_err(|_| v));

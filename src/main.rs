@@ -9,6 +9,9 @@ mod dapi;
 mod gateway;
 mod scanner;
 
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 #[tokio::main]
 async fn main() {
     dotenv::dotenv().ok();

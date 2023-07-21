@@ -44,10 +44,10 @@ pub struct MessageRelay {
 }
 
 impl MessageRelay {
-    const GIFT_OK_COLOR: i32 = 0x00FF00;
-    const GIFT_FAIL_COLOR: i32 = 0xFF0000;
-    const INFO_COLOR: i32 = 0x0000FF;
-    const ERROR_COLOR: i32 = 0xFE1213;
+    const GIFT_OK_COLOR: i32 = 0x20e916;
+    const GIFT_FAIL_COLOR: i32 = 0xffff47;
+    const INFO_COLOR: i32 = 0x00b3fa;
+    const ERROR_COLOR: i32 = 0xff1a1a;
 
     pub fn new(
         webhook_id: impl Into<String>,

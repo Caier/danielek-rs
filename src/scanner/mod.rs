@@ -300,7 +300,9 @@ impl GiftScanner {
     }
 
     async fn handle_guild_delete(&mut self, payload: &ijson::IValue) {
-        let id = payload["id"].as_string().map(|s| s.as_str()).unwrap();
+        let Some(id) = payload["id"].as_string().map(|s| s.as_str()) else {
+            return;
+        };
         SHARED
             .guilds
             .lock()

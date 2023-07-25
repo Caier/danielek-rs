@@ -16,7 +16,8 @@ use crate::gateway::{error::GCError, util::try_x_times};
 use super::{
     connection::{GatewayConnection, GatewayThreadMessage},
     error::GCResult,
-    types::{GatewayEvent, GatewayIntents},
+    types::GatewayIntents,
+    fake_types::GatewayEvent,
     util::fetch_wss_url,
 };
 
@@ -56,8 +57,8 @@ impl GatewayShard {
             last_ack: Instant::now(),
             heartbeat_interval: Duration::from_secs(3600),
             last_sequence: 0,
-            token: token.into(),
-            intents: intents.bits(),
+            token: token.into().into(),
+            intents,
             resume_info: None,
             websocket_config: ws_config,
             force_reconnect,
@@ -78,7 +79,7 @@ impl GatewayShard {
                     },
 
                     //fatal, but documented close, will not reconnect (ex. Invalid token)
-                    GCError::UnreconnectableClose(_) | GCError::InvalidPayload(_) | GCError::InternalChannelError(_) => {
+                    GCError::UnreconnectableClose(_) | GCError::InternalChannelError(_) | GCError::Deserialization(_) | GCError::Serialization(_) => {
                         error!("Connection failed with {err}");
                         conn.evnt_tx.send(Err(err)).ok();
                         break;

@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use smartstring::alias::String;
 
 pub type Snowflake<T = String> = T;
 

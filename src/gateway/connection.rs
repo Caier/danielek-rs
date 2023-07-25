@@ -1,11 +1,10 @@
 use std::{
     sync::{atomic::AtomicU64, Arc},
-    time::Duration,
+    time::Duration
 };
 
 use futures_util::{SinkExt, StreamExt};
 use log::debug;
-use ijson::ijson as json;
 use tokio::{
     net::TcpStream,
     select,
@@ -17,12 +16,14 @@ use tokio_tungstenite::{
     tungstenite::{protocol::WebSocketConfig, Message},
     MaybeTlsStream, WebSocketStream,
 };
+use smartstring::alias::String;
 
-use crate::gateway::types::GatewayOpcode;
+use crate::gateway::{types::GatewayOpcode, fake_types::{GatewayData, GatewayResumePayload}};
 
 use super::{
     error::{GCError, GCResult},
-    types::{GatewayEvent, ResumeInfo},
+    types::{ResumeInfo, GatewayIntents},
+    fake_types::{GatewayEvent, GatewayIdentifyPayload, GatewayConnectionProperties},
     util::fetch_wss_url,
 };
 
@@ -39,9 +40,9 @@ pub struct GatewayConnection {
     pub last_heartbeat: Instant,
     pub last_ack: Instant,
     pub heartbeat_interval: Duration,
-    pub last_sequence: i32,
+    pub last_sequence: i64,
     pub token: String,
-    pub intents: u64,
+    pub intents: GatewayIntents,
     pub resume_info: Option<ResumeInfo>,
     pub websocket_config: WebSocketConfig,
     pub force_reconnect: bool,
@@ -52,7 +53,7 @@ impl GatewayConnection {
     const RECONNECTABLE_CLOSES: [u16; 8] = [4000, 4001, 4002, 4003, 4005, 4007, 4008, 4009];
     const UNRECONNECTABLE_CLOSES: [u16; 6] = [4004, 4010, 4011, 4012, 4013, 4014];
 
-    async fn _connect(&mut self, url: impl Into<String>) -> GCResult<()> {
+    async fn _connect(&mut self, url: impl Into<std::string::String>) -> GCResult<()> {
         (self.ws, _) = connect_async_with_config(url.into(), Some(self.websocket_config))
             .await
             .map_err(GCError::ConnectError)?;
@@ -77,10 +78,10 @@ impl GatewayConnection {
             .await?;
 
         self.send_event(&GatewayEvent {
-            d: Some(json!({
-                "token": self.token,
-                "session_id": info.session_id,
-                "seq": self.last_sequence
+            d: Some(GatewayData::SendResume(GatewayResumePayload {
+                token: self.token.clone(),
+                session_id: info.session_id,
+                seq: self.last_sequence
             })),
             ..GatewayEvent::new(GatewayOpcode::RESUME)
         })
@@ -99,14 +100,18 @@ impl GatewayConnection {
 
     async fn identify(&mut self) -> GCResult<()> {
         let mut ident = GatewayEvent::new(GatewayOpcode::IDENTIFY);
-        ident.d = Some(json!({
-            "token": self.token,
-            "properties": {
-                "os": "Windows",
-                "browser": "danielek",
-                "device": "danielek"
+        ident.d = Some(GatewayData::SendIdentify(GatewayIdentifyPayload {
+            token: self.token.clone(),
+            properties: GatewayConnectionProperties {
+                os: "Windows".into(),
+                browser: "danielek".into(),
+                device: "danielek".into()
             },
-            "intents": self.intents
+            intents: self.intents,
+            presence: None,
+            compress: None,
+            large_threshold: None,
+            shard: None
         }));
 
         self.send_event(&ident).await
@@ -156,9 +161,7 @@ impl GatewayConnection {
 
     pub async fn send_event(&mut self, event: &GatewayEvent) -> GCResult<()> {
         self.ws
-            .send(Message::Text(serde_json::to_string(event).map_err(
-                |e| GCError::Misc(Some(e.into()), "Stringifying GatewayEvent failed".into()),
-            )?))
+            .send(Message::Text(serde_json::to_string(event).map_err(GCError::Serialization)?))
             .await
             .map_err(GCError::SendError)
     }
@@ -166,87 +169,51 @@ impl GatewayConnection {
     async fn handle_ws_msg(&mut self, msg: Message) -> GCResult<()> {
         match msg {
             Message::Text(msg) => {
-                match serde_json::from_str::<GatewayEvent>(&msg) {
-                    Err(why) => Err(GCError::Misc(
-                        Some(why.into()),
-                        format!("Error while deserializing {:#?} into GatewayEvent", msg).into(),
-                    ))?,
-                    Ok(event) => {
-                        if event.op == GatewayOpcode::HELLO {
-                            self.heartbeat_interval = Duration::from_millis(
-                                event
-                                    .d
-                                    .as_ref()
-                                    .and_then(|d| d["heartbeat_interval"].to_u64())
-                                    .ok_or(GCError::InvalidPayload(
-                                        "Hello payload has no heartbeat information".into(),
-                                    ))?,
-                            );
-                            self.next_heartbeat = Instant::now() + self.heartbeat_interval / 2;
-                            if self.resume_info.is_none() {
-                                //when resuming we shouldn't identify
-                                self.identify().await?;
-                            }
-                        }
-
-                        if let Some(s) = event.s.as_ref() {
-                            self.last_sequence = *s;
-                        }
-
-                        if let Some(t) = event.t.as_ref() {
-                            if t == "READY" {
-                                self.resume_info = Some(ResumeInfo {
-                                    gateway_url: event
-                                        .d
-                                        .as_ref()
-                                        .and_then(|d| d["resume_gateway_url"].as_string())
-                                        .ok_or(GCError::InvalidPayload(
-                                            "READY payload has no ResumeInfo information".into(),
-                                        ))?
-                                        .as_str()
-                                        .to_owned(),
-                                    session_id: event
-                                        .d
-                                        .as_ref()
-                                        .and_then(|d| d["session_id"].as_string())
-                                        .ok_or(GCError::InvalidPayload(
-                                            "READY payload has no ResumeInfo information".into(),
-                                        ))?
-                                        .as_str()
-                                        .to_owned(),
-                                });
-                            }
-                        }
-
-                        if event.op == GatewayOpcode::RECONNECT
-                            || event.op == GatewayOpcode::INVALID_SESSION
-                                && event
-                                    .d
-                                    .as_ref()
-                                    .is_some_and(|d| d.to_bool().unwrap_or(false))
-                        {
-                            Err(GCError::ReconnectableClose(None))?;
-                        } else if event.op == GatewayOpcode::INVALID_SESSION {
-                            Err(GCError::UnexpectedClose(None))?;
-                        }
-
-                        if event.op == GatewayOpcode::HEARTBEAT_ACK {
-                            self.last_ack = Instant::now();
-                            self.ping.store(
-                                (self.last_ack - self.last_heartbeat).as_millis() as u64,
-                                std::sync::atomic::Ordering::Relaxed,
-                            );
-                        }
-
-                        if event.op == GatewayOpcode::HEARTBEAT {
-                            self.next_heartbeat = Instant::now();
-                        }
-
-                        self.evnt_tx
-                            .send(Ok(event))
-                            .map_err(|e| GCError::InternalChannelError(e.into()))?;
+                let event = serde_json::from_str::<GatewayEvent>(&msg)
+                    .map_err(|e| GCError::Deserialization(
+                        format_serde_error::SerdeError::new(msg, e)
+                    ))?;
+                if let Some(GatewayData::Hello(h)) = event.d {
+                    self.heartbeat_interval = Duration::from_millis(h.heartbeat_interval as u64);
+                    self.next_heartbeat = Instant::now() + self.heartbeat_interval / 2;
+                    if self.resume_info.is_none() {
+                        //when resuming we shouldn't identify
+                        self.identify().await?;
                     }
                 }
+
+                if let Some(s) = event.s.as_ref() {
+                    self.last_sequence = *s;
+                }
+
+                if let Some(GatewayData::Ready(ref rdy)) = event.d {
+                    self.resume_info = Some(ResumeInfo {
+                        gateway_url: rdy.resume_gateway_url.clone(),
+                        session_id: rdy.session_id.clone()
+                    });
+                }
+
+                if event.op == GatewayOpcode::RECONNECT || matches!(event.d, Some(GatewayData::InvalidSession(rec)) if rec) {
+                    Err(GCError::ReconnectableClose(None))?;
+                } else if event.op == GatewayOpcode::INVALID_SESSION {
+                    Err(GCError::UnexpectedClose(None))?;
+                }
+
+                if event.op == GatewayOpcode::HEARTBEAT_ACK {
+                    self.last_ack = Instant::now();
+                    self.ping.store(
+                        (self.last_ack - self.last_heartbeat).as_millis() as u64,
+                        std::sync::atomic::Ordering::Relaxed,
+                    );
+                }
+
+                if event.op == GatewayOpcode::HEARTBEAT {
+                    self.next_heartbeat = Instant::now();
+                }
+
+                self.evnt_tx
+                    .send(Ok(event))
+                    .map_err(|e| GCError::InternalChannelError(e.into()))?;
             }
 
             Message::Close(msg) => {
@@ -279,7 +246,7 @@ impl GatewayConnection {
     async fn send_heartbeat(&mut self) -> GCResult<()> {
         let pay = GatewayEvent {
             op: GatewayOpcode::HEARTBEAT,
-            d: Some(json!(self.last_sequence)),
+            d: Some(GatewayData::SendHeartbeat(self.last_sequence)),
             s: None,
             t: None,
         };

@@ -32,11 +32,11 @@ dapi_endpoint! {
     pub fn channel_messages_get(channel_id: Snowflake<impl AsRef<str>>, limit: u32, anchor: Option<GetChannelMessagesAnchorParam<impl AsRef<str>>>) {
         let p = format!("/channels/{}/messages?limit={}", channel_id.as_ref(), limit);
         if let Some(a) = anchor {
-            p + &match a {
+            p + match a {
                 GetChannelMessagesAnchorParam::Around(s) => format!("&around={}", s.as_ref()),
                 GetChannelMessagesAnchorParam::Before(s) => format!("&before={}", s.as_ref()),
                 GetChannelMessagesAnchorParam::After(s) => format!("&after={}", s.as_ref())
-            }
+            }.as_str()
         } else { p }
     }
 }
@@ -57,7 +57,7 @@ dapi_endpoint! {
     pub fn webhook_execute(webhook_id: impl AsRef<str>, webhook_token: impl AsRef<str>, wait: bool, thread_id: Option<Snowflake<impl AsRef<str>>>) {
         let p = format!("/webhooks/{}/{}?wait={}", webhook_id.as_ref(), webhook_token.as_ref(), wait);
         if let Some(id) = thread_id {
-            p + &format!("&thread_id={}", id.as_ref())
+            p + format!("&thread_id={}", id.as_ref()).as_str()
         } else { p }
     }
 }

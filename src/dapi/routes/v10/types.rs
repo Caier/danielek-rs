@@ -2,7 +2,7 @@
 
 use derive_builder::Builder;
 use serde::{Deserialize, Serialize};
-
+use smartstring::alias::String;
 use crate::dapi::routes::common_types::{IntOrStr, Snowflake};
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug)]
@@ -249,7 +249,7 @@ pub struct ChannelMention {
 pub struct Emoji {
     pub id: Option<Snowflake>,
     pub name: Option<String>,
-    pub roles: Option<Snowflake>,
+    pub roles: Option<Vec<Snowflake>>,
     pub user: Option<User>,
     pub require_colons: Option<bool>,
     pub managed: Option<bool>,
@@ -275,6 +275,7 @@ pub struct MessageActivity {
 
 bitflags::bitflags! {
     #[derive(Serialize, Deserialize)]
+    #[serde(transparent)]
     pub struct GuildMemberFlags: u32 {
         const DID_REJOIN = 1 << 0;
         const COMPLETED_ONBOARDING = 1 << 1;
@@ -341,27 +342,27 @@ pub struct Message {
     pub channel_id: Snowflake,
     #[builder(default)]
     pub author: Option<User>,
-    pub content: String,
-    pub timestamp: iso8601_timestamp::Timestamp,
+    pub content: Option<String>,
+    pub timestamp: Option<iso8601_timestamp::Timestamp>,
     #[builder(default)]
     pub edited_timestamp: Option<iso8601_timestamp::Timestamp>,
-    pub tts: bool,
-    pub mention_everyone: bool,
+    pub tts: Option<bool>,
+    pub mention_everyone: Option<bool>,
     #[builder(default)]
-    pub mentions: Vec<User>,
+    pub mentions: Option<Vec<User>>,
     #[builder(default)]
-    pub mention_roles: Vec<Snowflake>,
+    pub mention_roles: Option<Vec<Snowflake>>,
     #[builder(default)]
     pub mention_channels: Option<Vec<ChannelMention>>,
     #[builder(default)]
-    pub attachments: Vec<Attachment>,
+    pub attachments: Option<Vec<Attachment>>,
     #[builder(default)]
-    pub embeds: Vec<Embed>,
+    pub embeds: Option<Vec<Embed>>,
     #[builder(default)]
     pub reactions: Option<Vec<Reaction>>,
     #[builder(default)]
     pub nonce: Option<IntOrStr>,
-    pub pinned: bool,
+    pub pinned: Option<bool>,
     #[builder(default)]
     pub webhook_id: Option<Snowflake>,
     #[builder(default)]
@@ -388,4 +389,187 @@ pub struct Message {
     pub position: Option<i64>,
     #[builder(default)]
     pub role_subscription_data: Option<RoleSubscriptionData>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug)]
+pub struct ChannelType(i32);
+impl ChannelType {
+    pub const GUILD_TEXT: Self = Self(0);
+    pub const DM: Self = Self(1);
+    pub const GUILD_VOICE: Self = Self(2);
+    pub const GROUP_DM: Self = Self(3);
+    pub const GUILD_CATEGORY: Self = Self(4);
+    pub const GUILD_ANNOUNCEMENT: Self = Self(5);
+    pub const ANNOUNCEMENT_THREAD: Self = Self(10);
+    pub const PUBLIC_THREAD: Self = Self(11);
+    pub const PRIVATE_THREAD: Self = Self(12);
+    pub const GUILD_STAGE_VOICE: Self = Self(13);
+    pub const GUILD_DIRECTORY: Self = Self(14);
+    pub const GUILD_FORUM: Self = Self(15);
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct PermissionOverwrite {
+    pub id: Snowflake,
+    pub r#type: i8,
+    pub allow: String,
+    pub deny: String
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct ThreadMetadata {
+    pub archived: bool,
+    pub auto_archive_duration: i32,
+    pub archive_timestamp: iso8601_timestamp::Timestamp,
+    pub locked: bool,
+    pub invitable: Option<bool>,
+    pub create_timestamp: Option<iso8601_timestamp::Timestamp>
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct ThreadMember {
+    pub id: Option<Snowflake>,
+    pub user_id: Option<Snowflake>,
+    pub join_timestamp: iso8601_timestamp::Timestamp,
+    pub flags: u64,
+    pub member: Option<GuildMember>
+}
+
+bitflags::bitflags! {
+    #[derive(Serialize, Deserialize)]
+    #[serde(transparent)]
+    pub struct ChannelFlags: u32 {
+        const PINNED = 1 << 1;
+        const REQUIRE_TAG = 1 << 4;
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct ForumTag {
+    pub id: Snowflake,
+    pub name: String,
+    pub moderated: bool,
+    pub emoji_id: Option<Snowflake>,
+    pub emoji_name: Option<String>
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct DefaultReaction {
+    pub emoji_id: Option<Snowflake>,
+    pub emoji_name: Option<String>
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Channel {
+    pub id: Snowflake,
+    pub r#type: ChannelType,
+    pub guild_id: Option<Snowflake>,
+    pub position: Option<i32>,
+    pub permission_overwrites: Option<Vec<PermissionOverwrite>>,
+    pub name: Option<String>,
+    pub topic: Option<String>,
+    pub nsfw: Option<bool>,
+    pub last_message_id: Option<Snowflake>,
+    pub bitrate: Option<i32>,
+    pub user_limit: Option<i32>,
+    pub rate_limit_per_user: Option<i32>,
+    pub recipients: Option<Vec<User>>,
+    pub icon: Option<String>,
+    pub owner_id: Option<Snowflake>,
+    pub application_id: Option<Snowflake>,
+    pub managed: Option<bool>,
+    pub parent_id: Option<Snowflake>,
+    pub last_pin_timestamp: Option<iso8601_timestamp::Timestamp>,
+    pub rtc_region: Option<String>,
+    pub video_quality_mode: Option<i32>,
+    pub message_count: Option<i64>,
+    pub member_count: Option<i32>,
+    pub thread_metadata: Option<ThreadMetadata>,
+    pub member: Option<GuildMember>,
+    pub default_auto_archive_duration: Option<i32>,
+    pub permissions: Option<String>,
+    pub flags: Option<ChannelFlags>,
+    pub total_message_sent: Option<i64>,
+    pub available_tags: Option<Vec<ForumTag>>,
+    pub applied_tags: Option<Vec<Snowflake>>,
+    pub default_reaction_emoji: Option<DefaultReaction>,
+    pub default_thread_rate_limit_per_user: Option<i32>,
+    pub default_sort_order: Option<i32>,
+    pub default_forum_layout: Option<i32>
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug)]
+pub struct VerificationLevel(u8);
+impl VerificationLevel {
+    pub const NONE: Self = Self(0);
+    pub const LOW: Self = Self(1);
+    pub const MEDIUM: Self = Self(2);
+    pub const HIGH: Self = Self(3);
+    pub const VERY_HIGH: Self = Self(4);
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug)]
+pub struct DefaultMessageNotificationLevel(u8);
+impl DefaultMessageNotificationLevel {
+    pub const ALL_MESSAGES: Self = Self(0);
+    pub const ONLY_MENTIONS: Self = Self(1);
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug)]
+pub struct ExplicitContentFilterLevel(u8);
+impl ExplicitContentFilterLevel {
+    pub const DISABLED: Self = Self(0);
+    pub const MEMBERS_WITHOUT_ROLES: Self = Self(1);
+    pub const ALL_MEMBERS: Self = Self(2);
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Role {
+    pub id: Snowflake,
+    pub name: String,
+    pub color: i32,
+    pub hoist: bool,
+    pub icon: Option<String>,
+    pub unicode_emoji: Option<String>,
+    pub position: i32,
+    pub permissions: String,
+    pub managed: bool,
+    pub mentionable: bool,
+    //pub tags: Option<>, a fucked up object
+    pub flags: u32
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug)]
+pub struct MfaLevel(u8);
+impl MfaLevel {
+    pub const NONE: Self = Self(0);
+    pub const ELEVATED: Self = Self(1);
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Guild {
+    pub id: Snowflake,
+    pub name: String,
+    pub icon: Option<String>,
+    pub icon_hash: Option<String>,
+    pub splash: Option<String>,
+    pub discovery_splash: Option<String>,
+    pub owner: Option<bool>,
+    pub owner_id: Snowflake,
+    pub permissions: Option<String>,
+    pub region: Option<String>,
+    pub afk_channel_id: Option<Snowflake>,
+    pub afk_timeout: i32,
+    pub widget_enabled: Option<bool>,
+    pub widget_channel_id: Option<Snowflake>,
+    pub verification_level: VerificationLevel,
+    pub default_message_notifications: DefaultMessageNotificationLevel,
+    pub explicit_content_filter: ExplicitContentFilterLevel,
+    pub roles: Vec<Role>,
+    pub emojis: Vec<Emoji>,
+    pub features: Vec<String>,
+    pub mfa_level: MfaLevel,
+    pub application_id: Option<Snowflake>,
+    pub system_channel_id: Option<Snowflake>,
+    //....rest https://discord.com/developers/docs/resources/guild#guild-object
 }

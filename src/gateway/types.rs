@@ -2,10 +2,13 @@
 
 use derive_builder::Builder;
 use serde::{Deserialize, Serialize};
+use smartstring::alias::String;
 
 use crate::dapi::routes::common_types::Snowflake;
 
 bitflags::bitflags! {
+    #[derive(Serialize, Deserialize)]
+    #[serde(transparent)]
     pub struct GatewayIntents: u64 {
         const GUILDS =                        1 << 0;
         const GUILD_MEMBERS =                 1 << 1;
@@ -49,7 +52,7 @@ impl GatewayOpcode {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct GatewayEvent {
     pub op: GatewayOpcode,
-    pub d: Option<ijson::IValue>,
+    pub d: Option<serde_json::Value>,
     pub s: Option<i32>,
     pub t: Option<String>,
 }
@@ -119,6 +122,7 @@ pub struct GatewayActivitySecrets {
 
 bitflags::bitflags! {
     #[derive(Serialize, Deserialize)]
+    #[serde(transparent)]
     pub struct GatewayActivityFlags: u32 {
         const INSTANCE =                    1 << 0;
         const JOIN =                        1 << 1;
@@ -185,7 +189,7 @@ pub enum GatewayStatus {
 
 #[derive(Serialize, Deserialize, Debug, Clone, Builder)]
 #[builder(setter(strip_option, into))]
-pub struct GatewayPresence {
+pub struct GatewayPresenceSend {
     #[builder(default)]
     pub since: Option<u64>,
     #[builder(default)]

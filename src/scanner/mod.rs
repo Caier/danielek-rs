@@ -1,12 +1,14 @@
 use crate::dapi::routes::common_types::Snowflake;
+use crate::dapi::routes::v10::types::Channel;
 use crate::dapi::routes::{v10 as v10Routes, v6 as v6Routes};
 use crate::dapi::versions::{v10, v6};
 use crate::dapi::{DApi, DApiError};
 use crate::gateway::error::GCResult;
+use crate::gateway::fake_types::{GatewayData, GatewayEvent, MessageExtra, UnavailableGuild, GatewayGuildCreatePayload, GatewayReadyPayload};
 use crate::gateway::shard::GatewayShard;
 use crate::gateway::types::{
-    GatewayActivityBuilder, GatewayActivityType, GatewayEvent, GatewayIntents, GatewayOpcode,
-    GatewayPresenceBuilder, GatewayStatus,
+    GatewayActivityBuilder, GatewayActivityType, GatewayIntents, GatewayOpcode,
+    GatewayPresenceSendBuilder, GatewayStatus,
 };
 use futures_util::StreamExt;
 use lazy_regex::regex;
@@ -17,6 +19,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use uuid::Uuid;
+use smartstring::alias::String;
 
 use self::message_relay::{GiftRedeemAttempt, GiftReport, MessageRelay};
 
@@ -43,7 +46,7 @@ pub struct GiftScanner {
     command_channel: Snowflake,
     command_guild: Snowflake,
     ready_at: Option<Instant>,
-    last_msg: Option<ijson::IValue>,
+    last_msg: Option<MessageExtra>,
     guild_channel_names: HashMap<Snowflake, String>,
 }
 
@@ -83,7 +86,7 @@ impl GiftScanner {
         };
 
         this.dapi.set_token(token);
-        this.redeem_dapi.set_token(redeem_token);
+        this.redeem_dapi.set_token(redeem_token.into());
 
         Ok(this)
     }
@@ -96,17 +99,18 @@ impl GiftScanner {
         while let Some(e) = recv.next().await {
             match e {
                 Ok(e) => {
-                    if let Some(ev_type) = e.t {
-                        let payload = e.d.unwrap_or(ijson::IValue::NULL);
-                        match ev_type.as_str() {
-                            "READY" => self.handle_ready(&payload).await?,
-                            "GUILD_CREATE" => self.handle_guild_create(&payload).await,
-                            "GUILD_DELETE" => self.handle_guild_delete(&payload).await,
-                            "MESSAGE_CREATE" => self.handle_message_create(payload).await,
-                            "CHANNEL_CREATE" | "CHANNEL_UPDATE" | "GUILD_UPDATE" => {
-                                self.handle_guild_or_channel_update(&payload)
-                            }
-                            _ => continue,
+                    if let Some(data) = e.d {
+                        match data {
+                            GatewayData::Ready(r) => self.handle_ready(r).await?,
+                            GatewayData::GuildCreate(ref g) => self.handle_guild_create(g).await,
+                            GatewayData::GuildDelete(ref g) => self.handle_guild_delete(g).await,
+                            GatewayData::MessageCreate(m) 
+                            | GatewayData::MessageUpdate(m) => self.handle_message_create(m).await,
+                            GatewayData::ChannelCreate(Channel { id, name: Some(name), .. }) 
+                            | GatewayData::ChannelUpdate(Channel { id, name: Some(name), .. })
+                                => self.handle_guild_or_channel_update(id, name),
+                            GatewayData::GuildUpdate(g) => self.handle_guild_or_channel_update(g.id, g.name),
+                            _ => continue
                         }
                     }
                 }
@@ -118,26 +122,24 @@ impl GiftScanner {
         Err("Scanner event stream stopped peacefully, this shouldn't have happened".into())
     }
 
-    fn handle_guild_or_channel_update(&mut self, payload: &ijson::IValue) {
-        let id = payload["id"].as_string();
-        let name = payload["name"].as_string().map(|s| s.as_str());
-        if let Some(id) = id {
-            self.guild_channel_names
-                .insert(id.as_str().to_owned(), name.unwrap_or("???").to_owned());
-        }
+    fn handle_guild_or_channel_update(&mut self, id: Snowflake, name: String) {
+        self.guild_channel_names.insert(id, name);
     }
 
-    async fn handle_message_create(&mut self, payload: ijson::IValue) {
-        if matches!(payload["channel_id"].as_string().map(|s| s.as_str()), Some(id) if id == self.command_channel) {
-            self.handle_command(payload["content"].as_string().map(|s| s.as_str()).unwrap_or(""))
-                .await;
+    async fn handle_message_create(&mut self, msg: MessageExtra) {
+        if msg.rest.content.is_none() {
+            return;
+        }
+    
+        if msg.rest.channel_id == self.command_channel {
+            self.handle_command(&msg.rest.content.unwrap()).await;
             return;
         }
 
-        self.last_msg = Some(payload);
-        let payload = self.last_msg.as_ref().unwrap();
+        self.last_msg = Some(msg);
+        let msg = self.last_msg.as_ref().unwrap();
 
-        let content = payload["content"].as_string().map(|s| s.as_str()).unwrap_or("");
+        let content = &msg.rest.content.as_ref().unwrap();
         let Some(gift_code) = regex!(r"discord\.gift/([\d\w]{1,19})(?: |$)"im).captures(content)
             .and_then(|c| c.get(1).map(|c| c.as_str())) else {
                 return;
@@ -148,7 +150,7 @@ impl GiftScanner {
             if code_lock.contains(gift_code) {
                 return;
             }
-            code_lock.insert(gift_code.to_owned());
+            code_lock.insert(gift_code.into());
         }
 
         let results = match gift_code.len() {
@@ -168,21 +170,16 @@ impl GiftScanner {
             }
         };
 
-        let channel_name = payload["channel_id"]
-            .as_string().map(|s| s.as_str())
-            .and_then(|id| self.guild_channel_names.get(id).map(|s| s.as_str()))
+        let channel_name = self.guild_channel_names.get(&msg.rest.channel_id)
+            .map(|s| s.as_str())
             .unwrap_or("??");
-        let guild_name = payload["guild_id"]
-            .as_string().map(|s| s.as_str())
-            .and_then(|id| self.guild_channel_names.get(id).map(|s| s.as_str()))
+        let guild_name = msg.guild_id.as_ref()
+            .and_then(|g| self.guild_channel_names.get(g).map(|s| s.as_str()))
             .unwrap_or("??");
         let safe_content = regex!("(?:@everyone)|(?:@here)").replace_all(content, "");
 
         let mut report = GiftReport {
-            from: payload["author"]["username"]
-                .as_string().map(|s| s.as_str())
-                .unwrap_or("??")
-                .into(),
+            from: msg.rest.author.as_ref().map(|u| u.username.as_str()).unwrap_or("??").into(),
             channel: channel_name.into(),
             guild: guild_name.into(),
             ping: self.shard.get_ping(),
@@ -286,7 +283,7 @@ impl GiftScanner {
                     self.shard.get_ping(),
                     self.last_msg
                         .as_ref()
-                        .and_then(|v| v["content"].as_string().map(|s| s.as_str()))
+                        .map(|v| v.rest.content.as_deref().unwrap())
                         .unwrap_or(""),
                     self.ignore,
                     guilds,
@@ -299,25 +296,29 @@ impl GiftScanner {
         }
     }
 
-    async fn handle_guild_delete(&mut self, payload: &ijson::IValue) {
-        let Some(id) = payload["id"].as_string().map(|s| s.as_str()) else {
-            return;
-        };
+    async fn handle_guild_delete(&mut self, guild: &UnavailableGuild) {
         SHARED
             .guilds
             .lock()
             .unwrap()
             .entry(self.id)
             .and_modify(|set| {
-                set.remove(id);
+                set.remove(&guild.id);
             });
-        self.guild_channel_names.remove(id);
+        self.guild_channel_names.remove(&guild.id);
     }
 
-    async fn handle_guild_create(&mut self, payload: &ijson::IValue) {
-        self.handle_guild_or_channel_update(payload);
-        let joined_id = payload["id"].as_string().map(|s| s.as_str()).unwrap();
-        if joined_id == self.command_guild {
+    async fn handle_guild_create(&mut self, guild: &GatewayGuildCreatePayload) {
+        if let GatewayGuildCreatePayload::Available(g) = guild {
+            self.handle_guild_or_channel_update(g.guild_info.id.clone(), g.guild_info.name.clone());
+        }
+
+        let joined_id = match guild {
+            GatewayGuildCreatePayload::Available(g) => &g.guild_info.name,
+            GatewayGuildCreatePayload::Unavailable(g) => &g.id
+        };
+
+        if *joined_id == self.command_guild {
             return;
         }
 
@@ -360,50 +361,47 @@ impl GiftScanner {
     async fn set_status(&mut self) -> GCResult<()> {
         self.shard
             .send(GatewayEvent {
-                d: Some(
-                    ijson::to_value(
-                        GatewayPresenceBuilder::default()
-                            .status(GatewayStatus::online)
-                            .activities([GatewayActivityBuilder::default()
-                                .r#type(GatewayActivityType::WATCHING)
-                                //.emoji(GatewayActivityEmoji { name: "moyai".into(), id: None, animated: None }) //seems not working with custom
-                                .name("y'all")
-                                .build()
-                                .unwrap()])
+                d: Some(GatewayData::SendUpdatePresence(
+                    GatewayPresenceSendBuilder::default()
+                        .status(GatewayStatus::online)
+                        .activities([GatewayActivityBuilder::default()
+                            .r#type(GatewayActivityType::WATCHING)
+                            //.emoji(GatewayActivityEmoji { name: "moyai".into(), id: None, animated: None }) //seems not working with custom
+                            .name("y'all")
                             .build()
-                            .unwrap(),
-                    )
-                    .unwrap(),
-                ),
+                            .unwrap()])
+                        .build()
+                        .unwrap()
+                )),
                 ..GatewayEvent::new(GatewayOpcode::PRESENCE_UPDATE)
             })
             .await
     }
 
-    async fn handle_ready(&mut self, payload: &ijson::IValue) -> Result<()> {
-        let name = payload["user"]["username"].as_string().map(|s| s.as_str()).ok_or("No username")?;
+    async fn handle_ready(&mut self, payload: GatewayReadyPayload) -> Result<()> {
+        let name = payload.user.username;
         if self.ready_at.is_none() {
-            let guilds = payload["guilds"]
-                .as_array()
-                .ok_or("Could not get guild array")?;
+            let guilds = payload.guilds;
             let mut lock = SHARED.guilds.lock().unwrap();
             for g in guilds {
-                let id = g["id"].as_string().map(|s| s.as_str()).ok_or("Guild lacks id")?.to_owned();
+                let GatewayGuildCreatePayload::Available(g) = g else { 
+                    return Err("Unavailable guilds in READY".into()) 
+                };
+                
                 lock.entry(self.id).and_modify(|set| {
-                    set.insert(id.clone());
+                    set.insert(g.guild_info.id.clone());
                 });
-                self.guild_channel_names
-                    .insert(id, g["name"].as_string().map(|s| s.as_str()).ok_or("Guild lacks name")?.to_owned());
-                for c in g["channels"].as_array().ok_or("Guild lacks channels")? {
+
+                self.guild_channel_names.insert(g.guild_info.id, g.guild_info.name);
+
+                for c in g.channels {
                     self.guild_channel_names.insert(
-                        c["id"].as_string().map(|s| s.as_str()).ok_or("Channel lacks id")?.to_owned(),
-                        c["name"]
-                            .as_string()
-                            .map(|s| s.as_str().to_owned())
-                            .unwrap_or_else(|| String::from("??")),
+                        c.id,
+                        c.name.unwrap_or_else(|| String::from("???")),
                     );
                 }
             }
+
             let self_guilds = lock.get(&self.id).unwrap();
             for guilds in lock.iter().filter(|e| *e.0 != self.id).map(|e| e.1) {
                 let dups: Vec<_> = self_guilds

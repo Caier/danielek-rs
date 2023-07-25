@@ -93,22 +93,22 @@ impl MessageRelay {
             .fields([
                 EmbedField {
                     name: "From".into(),
-                    value: format!("@{}", &report.from),
+                    value: format!("@{}", &report.from).into(),
                     inline: Some(true),
                 },
                 EmbedField {
                     name: "Channel".into(),
-                    value: format!("#{}", &report.channel),
+                    value: format!("#{}", &report.channel).into(),
                     inline: Some(true),
                 },
                 EmbedField {
                     name: "Guild".into(),
-                    value: report.guild.into_owned(),
+                    value: report.guild.into_owned().into(),
                     inline: Some(true),
                 },
                 EmbedField {
                     name: "Ping".into(),
-                    value: format!("{} ms", report.ping),
+                    value: format!("{} ms", report.ping).into(),
                     inline: Some(true),
                 },
             ])
@@ -119,7 +119,7 @@ impl MessageRelay {
             if let GiftRedeemAttempt::Claimed { gifter: g, .. } = &mut att.1 {
                 emb.fields([EmbedField {
                     name: "Gifter".into(),
-                    value: std::mem::take(g).into_owned(),
+                    value: std::mem::take(g).into_owned().into(),
                     inline: Some(true),
                 }]);
             }
@@ -215,22 +215,22 @@ impl MessageRelay {
                     .fields([
                         EmbedField {
                             name: "Guilds".into(),
-                            value: guilds.to_string(),
+                            value: guilds.to_string().into(),
                             inline: Some(true),
                         },
                         EmbedField {
                             name: "Channels".into(),
-                            value: channels.to_string(),
+                            value: channels.to_string().into(),
                             inline: Some(true),
                         },
                         EmbedField {
                             name: "Ping".into(),
-                            value: ping.to_string(),
+                            value: ping.to_string().into(),
                             inline: Some(true),
                         },
                         EmbedField {
                             name: "Ignore".into(),
-                            value: ignore.to_string(),
+                            value: ignore.to_string().into(),
                             inline: Some(true),
                         },
                         EmbedField {
@@ -238,7 +238,7 @@ impl MessageRelay {
                             value: if last_msg.len() > 250 {
                                 last_msg.chars().take(250).collect()
                             } else {
-                                last_msg.to_owned()
+                                last_msg.to_owned().into()
                             },
                             inline: Some(true),
                         },

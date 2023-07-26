@@ -47,7 +47,8 @@ pub struct GiftScanner {
     command_guild: Snowflake,
     ready_at: Option<Instant>,
     last_msg: Option<MessageExtra>,
-    guild_channel_names: HashMap<Snowflake, String>,
+    guild_names: HashMap<Snowflake, String>,
+    channel_names: HashMap<Snowflake, String>
 }
 
 impl GiftScanner {
@@ -82,7 +83,8 @@ impl GiftScanner {
             command_guild: command_guild.into(),
             ready_at: None,
             last_msg: None,
-            guild_channel_names: HashMap::new(),
+            guild_names: HashMap::new(),
+            channel_names: HashMap::new()
         };
 
         this.dapi.set_token(token);
@@ -100,18 +102,19 @@ impl GiftScanner {
             match e {
                 Ok(e) => {
                     if let Some(data) = e.d {
+                        use GatewayData::*;
                         match data {
-                            GatewayData::Ready(r) => self.handle_ready(r).await?,
-                            GatewayData::GuildCreate(ref g) => self.handle_guild_create(g).await,
-                            GatewayData::GuildDelete(ref g) => self.handle_guild_delete(g).await,
-                            GatewayData::MessageCreate(m) 
-                            | GatewayData::MessageUpdate(m) => self.handle_message_create(m).await,
-                            GatewayData::ChannelCreate(Channel { id, name: Some(name), .. }) 
-                            | GatewayData::ChannelUpdate(Channel { id, name: Some(name), .. })
-                                => self.handle_guild_or_channel_update(id, name),
-                            GatewayData::GuildUpdate(g) => self.handle_guild_or_channel_update(g.id, g.name),
+                            Ready(r) => self.handle_ready(r).await?,
+                            GuildCreate(ref g) => self.handle_guild_create(g).await,
+                            GuildDelete(ref g) => self.handle_guild_delete(g).await,
+                            GuildUpdate(g) => { self.guild_names.insert(g.id, g.name); }
+                            MessageCreate(m) | MessageUpdate(m) => self.handle_message_create(m).await,
+                            ChannelCreate(Channel { id, name: Some(name), .. }) 
+                                | ChannelUpdate(Channel { id, name: Some(name), .. })
+                                    => { self.channel_names.insert(id, name); }
+                            ChannelDelete(ref c) => { self.channel_names.remove(&c.id); }
                             _ => continue
-                        }
+                        };
                     }
                 }
 
@@ -120,10 +123,6 @@ impl GiftScanner {
         }
 
         Err("Scanner event stream stopped peacefully, this shouldn't have happened".into())
-    }
-
-    fn handle_guild_or_channel_update(&mut self, id: Snowflake, name: String) {
-        self.guild_channel_names.insert(id, name);
     }
 
     async fn handle_message_create(&mut self, msg: MessageExtra) {
@@ -170,11 +169,11 @@ impl GiftScanner {
             }
         };
 
-        let channel_name = self.guild_channel_names.get(&msg.rest.channel_id)
+        let channel_name = self.channel_names.get(&msg.rest.channel_id)
             .map(|s| s.as_str())
             .unwrap_or("??");
         let guild_name = msg.guild_id.as_ref()
-            .and_then(|g| self.guild_channel_names.get(g).map(|s| s.as_str()))
+            .and_then(|g| self.guild_names.get(g).map(|s| s.as_str()))
             .unwrap_or("??");
         let safe_content = regex!("(?:@everyone)|(?:@here)").replace_all(content, "");
 
@@ -287,7 +286,7 @@ impl GiftScanner {
                         .unwrap_or(""),
                     self.ignore,
                     guilds,
-                    self.guild_channel_names.len() - guilds,
+                    self.channel_names.len(),
                 )
                 .await;
         } else if msg.starts_with("...ignore") {
@@ -305,12 +304,12 @@ impl GiftScanner {
             .and_modify(|set| {
                 set.remove(&guild.id);
             });
-        self.guild_channel_names.remove(&guild.id);
+        self.guild_names.remove(&guild.id);
     }
 
     async fn handle_guild_create(&mut self, guild: &GatewayGuildCreatePayload) {
         if let GatewayGuildCreatePayload::Available(g) = guild {
-            self.handle_guild_or_channel_update(g.guild_info.id.clone(), g.guild_info.name.clone());
+            self.guild_names.insert(g.guild_info.id.clone(), g.guild_info.name.clone());
         }
 
         let joined_id = match guild {
@@ -336,7 +335,7 @@ impl GiftScanner {
                 .delete(&v10Routes::users_guilds_leave(joined_id), &())
                 .await;
             let name = self
-                .guild_channel_names
+                .guild_names
                 .get(joined_id)
                 .map(|s| s.as_str())
                 .unwrap_or("???");
@@ -392,13 +391,12 @@ impl GiftScanner {
                     set.insert(g.guild_info.id.clone());
                 });
 
-                self.guild_channel_names.insert(g.guild_info.id, g.guild_info.name);
+                self.guild_names.insert(g.guild_info.id, g.guild_info.name);
 
                 for c in g.channels {
-                    self.guild_channel_names.insert(
-                        c.id,
-                        c.name.unwrap_or_else(|| String::from("???")),
-                    );
+                    if let Some(name) = c.name {
+                        self.channel_names.insert(c.id, name);
+                    }
                 }
             }
 
@@ -407,7 +405,7 @@ impl GiftScanner {
                 let dups: Vec<_> = self_guilds
                     .intersection(guilds)
                     .filter(|g| **g != self.command_guild)
-                    .map(|g| self.guild_channel_names.get(g).unwrap_or(g))
+                    .map(|g| self.guild_names.get(g).unwrap_or(g))
                     .collect();
                 if !dups.is_empty() {
                     return Err(format!("@{}: Found duplicate guilds: {:?}", name, dups).into());

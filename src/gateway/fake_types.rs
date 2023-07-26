@@ -154,7 +154,7 @@ pub struct GatewayHelloPayload {
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct GatewayGuild {
-    pub joined_at: iso8601_timestamp::Timestamp,
+    pub joined_at: Option<iso8601_timestamp::Timestamp>,
     pub large: bool,
     pub unavailable: Option<bool>,
     pub member_count: i64,
@@ -172,7 +172,7 @@ pub struct GatewayGuild {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct UnavailableGuild {
     pub id: Snowflake,
-    pub unavailable: bool
+    pub unavailable: Option<bool>
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -185,11 +185,10 @@ pub enum GatewayGuildCreatePayload {
 impl<'de> Deserialize<'de> for GatewayGuildCreatePayload { //untagged will not work by itself if I don't implement every single field on GatewayGuild
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let raw: &serde_json::value::RawValue = Deserialize::deserialize(deserializer)?;
-        let res = serde_json::from_str::<UnavailableGuild>(raw.get());
-        if res.as_ref().is_ok_and(|h| !h.unavailable) || res.is_err() {
-            Ok(Self::Available(serde_json::from_str(raw.get()).map_err(serde::de::Error::custom)?))
-        } else {
-            Ok(Self::Unavailable(res.unwrap()))
+        let res = serde_json::from_str::<GatewayGuild>(raw.get());
+        match res {
+            Err(_) => Ok(Self::Unavailable(serde_json::from_str(raw.get()).map_err(serde::de::Error::custom)?)),
+            Ok(res) => Ok(Self::Available(res))
         }
     }
 }

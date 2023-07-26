@@ -314,7 +314,7 @@ impl GiftScanner {
         }
 
         let joined_id = match guild {
-            GatewayGuildCreatePayload::Available(g) => &g.guild_info.name,
+            GatewayGuildCreatePayload::Available(g) => &g.guild_info.id,
             GatewayGuildCreatePayload::Unavailable(g) => &g.id
         };
 

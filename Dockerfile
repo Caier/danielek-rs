@@ -21,10 +21,10 @@ RUN cargo build --release
 
 # The final base image
 FROM debian:buster-slim
+RUN apt update && apt install -y libssl-dev ca-certificates
+ENV RUST_BACKTRACE=1
 
 # Copy from the previous build
 COPY --from=build /danielek/target/release/danielek /usr/src/danielek
 
-RUN apt update && apt install -y libssl-dev ca-certificates
-ENV RUST_BACKTRACE=1
 CMD ["/usr/src/danielek"]

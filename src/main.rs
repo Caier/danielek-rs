@@ -59,9 +59,11 @@ async fn main() {
         )
         .await
         .unwrap();
+        let ready = scanner.get_ready_event();
         tasks.push(tokio::spawn(async move {
             scanner.start().await //should never return
         }));
+        let _ = ready.await;
     }
 
     match select_all(tasks).await {

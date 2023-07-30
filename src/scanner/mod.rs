@@ -14,6 +14,7 @@ use futures_util::StreamExt;
 use lazy_regex::regex;
 use log::info;
 use once_cell::sync::Lazy;
+use tokio::sync::oneshot;
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
@@ -48,7 +49,14 @@ pub struct GiftScanner {
     ready_at: Option<Instant>,
     last_msg: Option<MessageExtra>,
     guild_names: HashMap<Snowflake, String>,
-    channel_names: HashMap<Snowflake, String>
+    channel_names: HashMap<Snowflake, String>,
+    ready_event: Option<oneshot::Sender<()>>
+}
+
+impl Drop for GiftScanner {
+    fn drop(&mut self) {
+        SHARED.guilds.lock().unwrap().remove(&self.id);
+    }
 }
 
 impl GiftScanner {
@@ -84,13 +92,20 @@ impl GiftScanner {
             ready_at: None,
             last_msg: None,
             guild_names: HashMap::new(),
-            channel_names: HashMap::new()
+            channel_names: HashMap::new(),
+            ready_event: None
         };
 
         this.dapi.set_token(token);
         this.redeem_dapi.set_token(redeem_token.into());
 
         Ok(this)
+    }
+
+    pub fn get_ready_event(&mut self) -> oneshot::Receiver<()> {
+        let (tx, rx) = oneshot::channel();
+        self.ready_event = Some(tx);
+        rx
     }
 
     pub async fn start(&mut self) -> Result<()> {
@@ -412,6 +427,10 @@ impl GiftScanner {
                 }
             }
             info!("Logged in as @{name}");
+
+            if let Some(tx) = self.ready_event.take() {
+                tx.send(()).ok();
+            }
         } else {
             info!("Relogged as @{name}");
         }
@@ -420,11 +439,5 @@ impl GiftScanner {
         self.ready_at = Some(Instant::now());
         self.set_status().await?;
         Ok(())
-    }
-}
-
-impl Drop for GiftScanner {
-    fn drop(&mut self) {
-        SHARED.guilds.lock().unwrap().remove(&self.id);
     }
 }

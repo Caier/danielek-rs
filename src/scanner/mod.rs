@@ -1,5 +1,4 @@
 use crate::dapi::routes::common_types::Snowflake;
-use crate::dapi::routes::v10::types::Channel;
 use crate::dapi::routes::{v10 as v10Routes, v6 as v6Routes};
 use crate::dapi::versions::{v10, v6};
 use crate::dapi::{DApi, DApiError};
@@ -47,7 +46,7 @@ pub struct GiftScanner {
     command_channel: Snowflake,
     command_guild: Snowflake,
     ready_at: Option<Instant>,
-    last_msg: Option<MessageExtra>,
+    last_msg: Option<Box<MessageExtra>>,
     guild_names: HashMap<Snowflake, String>,
     channel_names: HashMap<Snowflake, String>,
     ready_event: Option<oneshot::Sender<()>>
@@ -120,14 +119,13 @@ impl GiftScanner {
                         use GatewayData::*;
                         match data {
                             Ready(r) => self.handle_ready(r).await?,
-                            GuildCreate(ref g) => self.handle_guild_create(g).await,
-                            GuildDelete(ref g) => self.handle_guild_delete(g).await,
+                            GuildCreate(g) => self.handle_guild_create(&g).await,
+                            GuildDelete(g) => self.handle_guild_delete(&g).await,
                             GuildUpdate(g) => { self.guild_names.insert(g.id, g.name); }
                             MessageCreate(m) | MessageUpdate(m) => self.handle_message_create(m).await,
-                            ChannelCreate(Channel { id, name: Some(name), .. }) 
-                                | ChannelUpdate(Channel { id, name: Some(name), .. })
-                                    => { self.channel_names.insert(id, name); }
-                            ChannelDelete(ref c) => { self.channel_names.remove(&c.id); }
+                            ChannelCreate(c) | ChannelUpdate(c) if c.name.is_some()
+                                => { self.channel_names.insert(c.id, c.name.unwrap()); }
+                            ChannelDelete(c) => { self.channel_names.remove(&c.id); }
                             _ => continue
                         };
                     }
@@ -140,7 +138,7 @@ impl GiftScanner {
         Err("Scanner event stream stopped peacefully, this shouldn't have happened".into())
     }
 
-    async fn handle_message_create(&mut self, msg: MessageExtra) {
+    async fn handle_message_create(&mut self, msg: Box<MessageExtra>) {
         if msg.rest.content.is_none() {
             return;
         }
@@ -376,7 +374,7 @@ impl GiftScanner {
         self.shard
             .send(GatewayEvent {
                 d: Some(GatewayData::SendUpdatePresence(
-                    GatewayPresenceSendBuilder::default()
+                    Box::new(GatewayPresenceSendBuilder::default()
                         .status(GatewayStatus::online)
                         .activities([GatewayActivityBuilder::default()
                             .r#type(GatewayActivityType::WATCHING)
@@ -386,13 +384,13 @@ impl GiftScanner {
                             .unwrap()])
                         .build()
                         .unwrap()
-                )),
+                ))),
                 ..GatewayEvent::new(GatewayOpcode::PRESENCE_UPDATE)
             })
             .await
     }
 
-    async fn handle_ready(&mut self, payload: GatewayReadyPayload) -> Result<()> {
+    async fn handle_ready(&mut self, payload: Box<GatewayReadyPayload>) -> Result<()> {
         let name = payload.user.username;
         if self.ready_at.is_none() {
             let guilds = payload.guilds;

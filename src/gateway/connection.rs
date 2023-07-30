@@ -78,11 +78,11 @@ impl GatewayConnection {
             .await?;
 
         self.send_event(&GatewayEvent {
-            d: Some(GatewayData::SendResume(GatewayResumePayload {
+            d: Some(GatewayData::SendResume(Box::new(GatewayResumePayload {
                 token: self.token.clone(),
                 session_id: info.session_id,
                 seq: self.last_sequence
-            })),
+            }))),
             ..GatewayEvent::new(GatewayOpcode::RESUME)
         })
         .await?;
@@ -100,7 +100,7 @@ impl GatewayConnection {
 
     async fn identify(&mut self) -> GCResult<()> {
         let mut ident = GatewayEvent::new(GatewayOpcode::IDENTIFY);
-        ident.d = Some(GatewayData::SendIdentify(GatewayIdentifyPayload {
+        ident.d = Some(GatewayData::SendIdentify(Box::new(GatewayIdentifyPayload {
             token: self.token.clone(),
             properties: GatewayConnectionProperties {
                 os: "Windows".into(),
@@ -112,7 +112,7 @@ impl GatewayConnection {
             compress: None,
             large_threshold: None,
             shard: None
-        }));
+        })));
 
         self.send_event(&ident).await
     }

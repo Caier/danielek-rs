@@ -96,25 +96,25 @@ impl<'de> Deserialize<'de> for GatewayEvent { //to avoid #[serde(untagged)], unt
 #[serde(untagged)]
 pub enum GatewayData {
     //send events
-    SendIdentify(GatewayIdentifyPayload),
-    SendResume(GatewayResumePayload),
+    SendIdentify(Box<GatewayIdentifyPayload>),
+    SendResume(Box<GatewayResumePayload>),
     SendHeartbeat(i64),
-    SendUpdatePresence(GatewayPresenceSend),
+    SendUpdatePresence(Box<GatewayPresenceSend>),
 
     //connection-related events
     Hello(GatewayHelloPayload),
     InvalidSession(bool),
 
     //data events op = 0
-    Ready(GatewayReadyPayload),
-    ChannelCreate(Channel),
-    ChannelUpdate(Channel),
-    ChannelDelete(Channel),
-    GuildCreate(GatewayGuildCreatePayload),
-    GuildUpdate(Guild),
+    Ready(Box<GatewayReadyPayload>),
+    ChannelCreate(Box<Channel>),
+    ChannelUpdate(Box<Channel>),
+    ChannelDelete(Box<Channel>),
+    GuildCreate(Box<GatewayGuildCreatePayload>),
+    GuildUpdate(Box<Guild>),
     GuildDelete(UnavailableGuild),
-    MessageCreate(MessageExtra),
-    MessageUpdate(MessageExtra)
+    MessageCreate(Box<MessageExtra>),
+    MessageUpdate(Box<MessageExtra>)
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

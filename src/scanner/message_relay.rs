@@ -140,7 +140,7 @@ impl MessageRelay {
                 | GiftRedeemAttempt::Claimed { info, .. }
                 | GiftRedeemAttempt::Invalid { info } => Cow::Owned(format!("```json\n{info}\n```")),
                 GiftRedeemAttempt::Ignored => {
-                    Cow::Borrowed("Nitro Classic or invalid code. Ignored")
+                    Cow::Borrowed("Ignored Nitro Basic")
                 }
             })
             .build()

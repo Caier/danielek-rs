@@ -232,7 +232,7 @@ impl GiftScanner {
                 }
                 Ok(info) => {
                     let name = info["store_listing"]["sku"]["name"].as_str();
-                    if name == Some("Nitro Classic") || name.is_none() {
+                    if name == Some("Nitro Basic") || name.is_none() {
                         return Ok((code, GiftRedeemAttempt::Ignored));
                     }
                 }

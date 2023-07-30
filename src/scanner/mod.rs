@@ -288,18 +288,24 @@ impl GiftScanner {
                 .command_ping(&self.username, self.shard.get_ping())
                 .await;
         } else if msg.starts_with("...stats") {
+            let Some(lm) = self.last_msg.as_ref() else {
+                return;
+            };
             let guilds = SHARED.guilds.lock().unwrap().get(&self.id).unwrap().len();
             self.relay
                 .command_stats(
                     &self.username,
                     self.shard.get_ping(),
-                    self.last_msg
-                        .as_ref()
-                        .map(|v| v.rest.content.as_deref().unwrap())
-                        .unwrap_or(""),
+                    lm.rest.content.as_deref().unwrap_or(""),
                     self.ignore,
                     guilds,
                     self.channel_names.len(),
+                    lm.rest.author.as_ref().map(|a| a.username.as_str()).unwrap_or("??"),
+                    self.channel_names.get(&lm.rest.channel_id).map(|s| s.as_str()).unwrap_or("??"),
+                    lm.guild_id.as_ref()
+                        .and_then(|g| 
+                            self.guild_names.get(g).map(|s| s.as_str()))
+                        .unwrap_or("??")
                 )
                 .await;
         } else if msg.starts_with("...ignore") {

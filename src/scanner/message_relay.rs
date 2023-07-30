@@ -206,6 +206,9 @@ impl MessageRelay {
         ignore: bool,
         guilds: usize,
         channels: usize,
+        author: &str,
+        channel_name: &str,
+        guild_name: &str
     ) {
         self.send(
             &MessagePayloadBuilder::default()
@@ -234,7 +237,8 @@ impl MessageRelay {
                             inline: Some(true),
                         },
                         EmbedField {
-                            name: "Last message".into(),
+                            name: format!("from: **@{}**, in: **#{}**, on: **{}**", author, channel_name, guild_name)
+                                .chars().take(250).collect(),
                             value: if last_msg.len() > 250 {
                                 last_msg.chars().take(250).collect()
                             } else {

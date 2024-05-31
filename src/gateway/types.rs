@@ -10,6 +10,7 @@ bitflags::bitflags! {
     #[derive(Serialize, Deserialize)]
     #[serde(transparent)]
     pub struct GatewayIntents: u64 {
+        const NONE =                               0;
         const GUILDS =                        1 << 0;
         const GUILD_MEMBERS =                 1 << 1;
         const GUILD_MODERATION =              1 << 2;

@@ -1,7 +1,7 @@
 #![allow(unused)]
 
 use crate::dapi::{
-    routes::v10::types::{Message, MessagePayload},
+    routes::v10::types::{Message, MessagePayload, User},
     types::{dapi_endpoint, DApiDELETE, DApiGET, DApiPOST, DApiVersion},
     versions::v10,
 };
@@ -38,6 +38,15 @@ dapi_endpoint! {
                 GetChannelMessagesAnchorParam::After(s) => format!("&after={}", s.as_ref())
             }.as_str()
         } else { p }
+    }
+}
+
+dapi_endpoint! {
+    version = v10,
+    DApiGET = (User);
+
+    pub fn users_me() {
+        "/users/@me"
     }
 }
 

@@ -29,6 +29,7 @@ pub use self::types::{DApiDELETE, DApiError, DApiGET, DApiPATCH, DApiPOST, DApiP
 pub struct DApi<V: DApiVersion> {
     http: reqwest::Client,
     token: Option<String>,
+    user_agent: String,
     api_base: String,
     api_ver: PhantomData<V>,
     ratelimits: RwLock<HashMap<String, Mutex<Option<Instant>>>>,
@@ -43,6 +44,7 @@ impl<V: DApiVersion> DApi<V> {
                 .build()
                 .map_err(DApiError::Instantiation)?,
             token: None,
+            user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/111.0.0.0 Safari/537.36".to_owned(),
             api_base: format!("https://discord.com/api/{}", V::VER),
             api_ver: Default::default(),
             ratelimits: Default::default(),
@@ -52,6 +54,10 @@ impl<V: DApiVersion> DApi<V> {
 
     pub fn set_token(&mut self, token: impl Into<String>) {
         self.token = Some(token.into());
+    }
+
+    pub fn set_user_agent(&mut self, user_agent: impl Into<String>) {
+        self.user_agent = user_agent.into();
     }
 
     fn path_into_resource(path: &str) -> Option<&str> {
@@ -100,7 +106,7 @@ impl<V: DApiVersion> DApi<V> {
             }
 
             let mut req = self.http.request(method.clone(), self.api_base.clone() + path)
-                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/111.0.0.0 Safari/537.36")
+                .header("User-Agent", &self.user_agent)
                 .header("Content-Type", "application/json");
 
             if let Some(ref token) = self.token {
